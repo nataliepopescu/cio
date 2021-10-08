@@ -69,37 +69,33 @@ def findTargetFiles(mir_file): #single_file):
     return filelist
 
 
-#def findTargetFiles(mir_filelist): #single_file):
-    # files
-    #if single_file:
-    #    target = single_file
-    #else:
-    #    target = "."
-    #rs_files = subprocess.run(["find", target, "-name", "*.rs", "-type", "f"], 
-    #        capture_output=True, text=True)
-    #filelist = rs_files.stdout.split()
-    #if os.path.exists("ignore.txt"):
-    #    with open("ignore.txt", 'r') as fd:
-    #        lines = fd.readlines()
-    #        ignore_list = [i.strip() for i in lines]
+def findTargetFilesOld():
+    target = "."
+    rs_files = subprocess.run(["find", target, "-name", "*.rs", "-type", "f"], 
+            capture_output=True, text=True)
+    filelist = rs_files.stdout.split()
+    if os.path.exists("ignore.txt"):
+        with open("ignore.txt", 'r') as fd:
+            lines = fd.readlines()
+            ignore_list = [i.strip() for i in lines]
 
-    #    final_list = filelist.copy()
-    #    for f in filelist:
-    #        for ignore in ignore_list:
-    #            if ignore in f:
-    #                if f in final_list:
-    #                    final_list.remove(f)
+        final_list = filelist.copy()
+        for f in filelist:
+            for ignore in ignore_list:
+                if ignore in f:
+                    if f in final_list:
+                        final_list.remove(f)
 
-    #    print("Removed", len(filelist) - len (final_list), "files")
-    #    filelist = final_list
-    #return filelist
+        print("Removed", len(filelist) - len (final_list), "files")
+        filelist = final_list
+    return filelist
 
 
 # Convert all things in place in one file
 # old_fname is the file before conversion
 # new_fname is the file after conversion 
 # selective unsafe contains the lines that we want to keep the unsafe
-def convertFile(old_fname, new_fname, selective_safe=[]):
+def convertFile(old_fname, new_fname, selective_safe=[], make_selective_unsafe=False):
     # mutregex_in = r'([($a-zA-Z_][a-zA-Z0-9:_\.\(\)\*]*)\.get_unchecked_mut\(' #]([0-9a-zA-Z_][a-zA-Z0-9_\.\>\*\+ ]*)[)]'
     # mutregex_out = r'(&mut \1[' #\2])'
     # regex_in = r'([($a-zA-Z_][a-zA-Z0-9:_\.\(\)\*]*)\.get_unchecked\(' #]([0-9a-zA-Z_][a-zA-Z0-9_\.\>\*\+ ]*)[)]'
@@ -122,12 +118,12 @@ def convertFile(old_fname, new_fname, selective_safe=[]):
     with open(old_fname, 'r') as fd:
         old_block = fd.read()
 
-    block, bcs_mut = convertBlock(old_block, mutregex_in, mutregex_out, 1, selective_safe)
+    block, bcs_mut = convertBlock(old_block, mutregex_in, mutregex_out, 1, selective_safe, make_selective_unsafe)
     if block == None or bcs_mut == None:
         print("Conversion failed in file %s" % old_fname)
         exit()
 
-    block, bcs_immut = convertBlock(block, regex_in, regex_out, 1, selective_safe)
+    block, bcs_immut = convertBlock(block, regex_in, regex_out, 1, selective_safe, make_selective_unsafe)
     if block == None or bcs_immut == None:
         print("Conversion failed in file %s" % old_fname)
         exit()
@@ -175,7 +171,7 @@ def findMatchingParenthsis(block):
 # Step 1: go back and replace the handle with regex
 # Step 2: go forward and find matching parenthesis, replace it as "])"
 # Step 3: convert whatever is inside
-def convertBlock(block, regex_in, regex_out, cur_line=1, selective_safe=[]):
+def convertBlock(block, regex_in, regex_out, cur_line=1, selective_safe=[], make_selective_unsafe=False):
     bcs = []
     new_block = ""
 
@@ -215,12 +211,18 @@ def convertBlock(block, regex_in, regex_out, cur_line=1, selective_safe=[]):
         else:
             old_col = len(pre_block) - old_col
 
-        # if choose not to convert this line to safe
-        if not cur_line in selective_safe:
-            #print(cur_line)
-            new_block += pre_block + cur_block
-            block = post_block
-            continue
+        if make_selective_unsafe:
+            if cur_line in selective_safe: # treat like selective_unsafe
+                new_block += pre_block + cur_block
+                block = post_block
+                continue
+        else:
+            # if choose not to convert this line to safe
+            if not cur_line in selective_safe:
+                #print(cur_line)
+                new_block += pre_block + cur_block
+                block = post_block
+                continue
 
         # find match parenthesis in post_block
         pos = findMatchingParenthsis(post_block)
@@ -238,7 +240,7 @@ def convertBlock(block, regex_in, regex_out, cur_line=1, selective_safe=[]):
         cur_block = re.sub(regex_in, regex_out, cur_block, count=1)
         new_col = old_col + len(cur_block) - 1
 
-        new_middle_block, addition_bcs = convertBlock(post_block[:pos], regex_in, regex_out, cur_line, selective_safe)
+        new_middle_block, addition_bcs = convertBlock(post_block[:pos], regex_in, regex_out, cur_line, selective_safe, make_selective_unsafe)
 
         # add bounds checks from the middle block to the bcs
         if addition_bcs is None:
@@ -282,7 +284,7 @@ def argParse():
             required=False,
             type=str,
             nargs=1,
-            default="/exploreunsafe/mir-filelist",
+            #default="/exploreunsafe/mir-filelist",
             help="Specify the mir output file that contains the filenames, line #s, and col #s /"
             "of the function calls to convert") #this if only want to apply this tool to a single file")
     parser.add_argument("--logfile", "-l",
@@ -315,22 +317,27 @@ if __name__ == "__main__":
     #os.environ["RUSTFLAGS"] = "-Z convert-unchecked-indexing"
     #mir_filelist = subprocess.run(["cargo", "bench", "--no-run"], capture_output=True, text=True)
 
-    if "mozilla" in root: 
-        #patchAll(".", "vendor", "vendor")
-        fd = open(mir_filelist, 'r')
-    else:
-        fd = open(mir_filelist[0], 'r')
-
-    filelist = findTargetFiles(fd)
-    #print("\nFilelist: \n")
-    #for f in filelist.items():
-    #    print(f)
-    #print()
-    
-    # List of all bounds checks
     bcs = []
-    for fname in filelist.keys():
-        bcs.extend(convertFile(fname, fname, filelist[fname]))
+
+    if mir_filelist == None:
+        filelist = findTargetFilesOld()
+        for f in filelist:
+            bcs.extend(convertFile(f, f, [], make_selective_unsafe=True))
+    else:
+        if "mozilla" in root: 
+            #patchAll(".", "vendor", "vendor")
+            fd = open(mir_filelist, 'r')
+        else:
+            fd = open(mir_filelist[0], 'r')
+        filelist = findTargetFiles(fd)
+        #print("\nFilelist: \n")
+        #for f in filelist.items():
+        #    print(f)
+        #print()
+    
+        # List of all bounds checks
+        for fname in filelist.keys():
+            bcs.extend(convertFile(fname, fname, filelist[fname]))
 
     dumpBCs(bcs, logfile)
 
