@@ -10,6 +10,7 @@ import datetime
 from aggregate import dump_benchmark, path_wrangle, writerow
 import numpy
 from crunch import stats2
+from result_presenter_fig1 import gen_figure1
 
 ROOT_PATH = os.path.dirname(os.path.realpath(__file__))
 VENDOR_DIR = "vendor"
@@ -21,7 +22,6 @@ UNSAFE_DIR = os.path.join(ROOT_PATH, "unsafe-crates")
 SAFE_DIR = os.path.join(ROOT_PATH, "safe-crates")
 EXP_DIRS = [UNSAFE_DIR, SAFE_DIR]
 RESULTS = "results"
-ALL_RESULTS_DIR = os.path.join(ROOT_PATH, RESULTS)
 CRUNCHED = "crunched.data"
 
 HEADERS = ['#', 'bench-name', 'unmod-time', 'unmod-error', 'regex-time', 'regex-error']
@@ -30,6 +30,8 @@ class CIO:
 
     def __init__(self, crates, rust_version, vendor, num_runs):
         self.rust_version = "mod" if rust_version == None else "nightly-{}".format(rust_version)
+        self.raw_results = "{}-{}".format(RESULTS, rust_version)
+        self.agg_results = os.path.join(ROOT_PATH, self.raw_results)
         self.vendor = vendor
         self.num_runs = 10 if num_runs == None else num_runs
         self.crates = crates
@@ -155,21 +157,21 @@ class CIO:
         for DIR in EXP_DIRS: 
             for crate in self.crate_paths: 
                 os.chdir(os.path.join(DIR, crate))
-                subprocess.run(["mkdir", "-p", RESULTS])
-                os.chdir(os.path.join(DIR, crate, RESULTS))
+                subprocess.run(["mkdir", "-p", self.raw_results])
+                os.chdir(os.path.join(DIR, crate, self.raw_results))
                 for run in range(self.num_runs):
                     subprocess.run(["mkdir", "-p", str(run)])
 
         # Create results directory for aggregated output
-        subprocess.run(["mkdir", "-p", ALL_RESULTS_DIR])
-        os.chdir(ALL_RESULTS_DIR)
+        subprocess.run(["mkdir", "-p", self.agg_results])
+        os.chdir(self.agg_results)
         for crate in self.crate_paths: 
-            os.chdir(ALL_RESULTS_DIR)
+            os.chdir(self.agg_results)
             subprocess.run(["mkdir", "-p", crate])
             os.chdir(crate)
             for run in range(self.num_runs):
                 subprocess.run(["mkdir", "-p", str(run)])
-            os.chdir(ALL_RESULTS_DIR)
+            os.chdir(self.agg_results)
                 
         for run in range(self.num_runs): 
             print("Run #{}".format(str(run)))
@@ -189,8 +191,8 @@ class CIO:
                     else: 
                         print("\t\tconverted")
                     os.chdir(os.path.join(DIR, crate))
-                    run_out = os.path.join(RESULTS, str(run), RUN_OUT)
-                    run_err = os.path.join(RESULTS, str(run), RUN_ERR)
+                    run_out = os.path.join(self.raw_results, str(run), RUN_OUT)
+                    run_err = os.path.join(self.raw_results, str(run), RUN_ERR)
                     with open(run_out, "w") as ro, open(run_err, "w") as re: 
                         try: 
                             subprocess.run(["cargo", "bench", "--verbose"], 
@@ -205,24 +207,21 @@ class CIO:
         print("Aggregating results")
 
         # Parse per-run data
-        #subprocess.run(["mkdir", "-p", ALL_RESULTS_DIR])
-        #os.chdir(ALL_RESULTS_DIR)
         for crate_path in self.crate_paths: 
-            #subprocess.run(["mkdir", "-p", crate_path])
             for run in range(self.num_runs):
-                unsafe_res = os.path.join(UNSAFE_DIR, crate_path, RESULTS, str(run), RUN_OUT)
-                safe_res = os.path.join(SAFE_DIR, crate_path, RESULTS, str(run), RUN_OUT)
-                parsed_file = os.path.join(ALL_RESULTS_DIR, crate_path, str(run), RUN_PARSED)
+                unsafe_res = os.path.join(UNSAFE_DIR, crate_path, self.raw_results, str(run), RUN_OUT)
+                safe_res = os.path.join(SAFE_DIR, crate_path, self.raw_results, str(run), RUN_OUT)
+                parsed_file = os.path.join(self.agg_results, crate_path, str(run), RUN_PARSED)
                 dump_benchmark(parsed_file, unsafe_res, safe_res, 1)
-        os.chdir(ALL_RESULTS_DIR)
+        os.chdir(self.agg_results)
 
         # Aggregate across runs
         for crate_path in self.crate_paths: 
-            crunchedfile = os.path.join(ALL_RESULTS_DIR, crate_path, CRUNCHED)
+            crunchedfile = os.path.join(self.agg_results, crate_path, CRUNCHED)
             path_wrangle(crunchedfile, HEADERS)
 
             # Use one file to get the number of unique benchmarks
-            samplefile = os.path.join(ALL_RESULTS_DIR, crate_path, "0", RUN_PARSED)
+            samplefile = os.path.join(self.agg_results, crate_path, "0", RUN_PARSED)
             with open(samplefile, "r") as fd: 
                 rows = len(fd.readlines()) - 1
             cols = 2
@@ -231,7 +230,7 @@ class CIO:
             # Populate matrix with per-run data for each benchmark
             bench_names = []
             for run in range(self.num_runs):
-                infile = os.path.join(ALL_RESULTS_DIR, crate_path, str(run), RUN_PARSED)
+                infile = os.path.join(self.agg_results, crate_path, str(run), RUN_PARSED)
                 with open(infile, "r") as infd: 
                     for row, line in enumerate(infd): 
                         # Skip header
@@ -287,16 +286,16 @@ if __name__ == "__main__":
 
     cio = CIO(crates, rust_version, vendor, num_runs)
 
-    cio.download_crates()
-    cio.set_rust_version()
-    if rust_version == None: 
-        cio.convert_to_safe(mod=True)
-    else: 
-        cio.convert_to_safe()
+    #cio.download_crates()
+    #cio.set_rust_version()
+    #if rust_version == None: 
+    #    cio.convert_to_safe(mod=True)
+    #else: 
+    #    cio.convert_to_safe()
 
     # Compile benchmarks and log duration
     start = datetime.datetime.now()
-    cio.compile_benchmarks()
+    #cio.compile_benchmarks()
     end = datetime.datetime.now()
     duration = end - start
     durfile = "duration-compile"
@@ -307,7 +306,7 @@ if __name__ == "__main__":
 
     # Run benchmarks and log duration
     start = datetime.datetime.now()
-    cio.run_benchmarks()
+    #cio.run_benchmarks()
     end = datetime.datetime.now()
     duration = end - start
     durfile = "duration-benchmark"
@@ -317,4 +316,7 @@ if __name__ == "__main__":
         fd.write("duration:\t{}\n".format(duration))
 
     # Aggregate results
-    cio.aggregate_results()
+    #cio.aggregate_results()
+
+    # Generate plot
+    gen_figure1(self.agg_results)

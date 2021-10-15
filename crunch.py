@@ -12,11 +12,11 @@ from statistics import median
 def stats2(array):
     list_arr = array.tolist()
     # drop two highest
-    #list_arr.remove(max(list_arr))
-    #list_arr.remove(max(list_arr))
+    list_arr.remove(max(list_arr))
+    list_arr.remove(max(list_arr))
     # drop two lowest
-    #list_arr.remove(min(list_arr))
-    #list_arr.remove(min(list_arr))
+    list_arr.remove(min(list_arr))
+    list_arr.remove(min(list_arr))
     # median calc
     med = median(list_arr)
     # standard deviation calc
