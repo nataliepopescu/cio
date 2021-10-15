@@ -47,16 +47,16 @@ def dump_benchmark(
     bnames = re.findall(name_pattern, check_output(["cat", unmod]).decode('utf-8'))
     unmod_result = re.findall(pattern, check_output(["cat", unmod]).decode('utf-8'))
     regex_result = re.findall(pattern, check_output(["cat", regex]).decode('utf-8'))
-    print(bnames)
-    print()
-    print(unmod_result)
-    print(regex_result)
+    #print(bnames)
+    #print()
+    #print(unmod_result)
+    #print(regex_result)
     # get rid of nasty commas
     output = []
     unmod_len = len(unmod_result)
     regex_len = len(regex_result)
     length = unmod_len if unmod_len < regex_len else regex_len
-    print(length)
+    #print(length)
     for i in range(length):
         line = []
         # grab and append benchmark name to line
@@ -98,7 +98,7 @@ def dump_benchmark(
     # check that path and file exist, or create them
     path_wrangle(filepath, headers)
     # write data to the file
-    with open(filepath, 'a') as handle:
+    with open(filepath, "a") as handle:
         for elem in output:
             writerow(handle, elem)
 
@@ -109,10 +109,10 @@ def path_wrangle(filepath, headers):
     # check for or create directory path
     directory = os.path.split(filepath)[0]
     if not os.path.exists(directory):
-            os.makedirs(directory)
+        os.makedirs(directory)
     # regardless if file itself exists or not, want blank slate so:
     # create new or overwrite existing data
-    with open(filepath, 'w') as newhandle:
+    with open(filepath, "w") as newhandle:
         writerow(newhandle, headers)
 
 def writerow(filehandle, array):

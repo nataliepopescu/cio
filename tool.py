@@ -8,16 +8,20 @@ from make_patch import patchAll
 import random
 import datetime
 from aggregate import dump_benchmark, path_wrangle, writerow
+import numpy
 from crunch import stats2
 
 ROOT_PATH = os.path.dirname(os.path.realpath(__file__))
 VENDOR_DIR = "vendor"
 COMP_LOG = "compile.log"
-RUN_LOG = "run.log"
+RUN_OUT = "run.out"
+RUN_ERR = "run.err"
+RUN_PARSED = "run.parsed"
 UNSAFE_DIR = os.path.join(ROOT_PATH, "unsafe-crates")
 SAFE_DIR = os.path.join(ROOT_PATH, "safe-crates")
 EXP_DIRS = [UNSAFE_DIR, SAFE_DIR]
-RESULT_DIR = os.path.join(ROOT_PATH, "results")
+RESULTS = "results"
+ALL_RESULTS_DIR = os.path.join(ROOT_PATH, RESULTS)
 CRUNCHED = "crunched.data"
 
 HEADERS = ['#', 'bench-name', 'unmod-time', 'unmod-error', 'regex-time', 'regex-error']
@@ -100,7 +104,7 @@ class CIO:
             mir_filelist = "/exploreunsafe/mir-filelist"
             os.chdir(safe_crate_dir)
             for crate_path in self.crate_paths:
-                print("Compiling {}".format(crate_path))
+                print("Collecting unchecked indexing ops to convert for {}".format(crate_path))
                 os.chdir(crate_path)
                 subprocess.run(["rm", "-f", mir_filelist])
                 subprocess.run(["cargo", "clean"])
@@ -147,69 +151,87 @@ class CIO:
         os.chdir(ROOT_PATH)
 
     def run_benchmarks(self):
-        # Create results directory
+        # Create results directory for raw output
         for DIR in EXP_DIRS: 
             for crate in self.crate_paths: 
                 os.chdir(os.path.join(DIR, crate))
-                subprocess.run(["mkdir", "-p", RESULT_DIR])
+                subprocess.run(["mkdir", "-p", RESULTS])
+                os.chdir(os.path.join(DIR, crate, RESULTS))
+                for run in range(self.num_runs):
+                    subprocess.run(["mkdir", "-p", str(run)])
+
+        # Create results directory for aggregated output
+        subprocess.run(["mkdir", "-p", ALL_RESULTS_DIR])
+        os.chdir(ALL_RESULTS_DIR)
+        for crate in self.crate_paths: 
+            os.chdir(ALL_RESULTS_DIR)
+            subprocess.run(["mkdir", "-p", crate])
+            os.chdir(crate)
+            for run in range(self.num_runs):
+                subprocess.run(["mkdir", "-p", str(run)])
+            os.chdir(ALL_RESULTS_DIR)
                 
         for run in range(self.num_runs): 
-            print("Run #{}".format(run))
+            print("Run #{}".format(str(run)))
             # In even runs benchmark safe crates first, 
             # in odd runs benchmark unsafe crates first
-            if run % 2 == 0:
-                EXP_DIRS = [SAFE_DIR, UNSAFE_DIR]
+            #   <run> goes from 0 to len(self.num_runs) - 1
+            LOCAL_EXP_DIRS = [SAFE_DIR, UNSAFE_DIR] if run % 2 == 0 else EXP_DIRS
             # Randomize crate order for every new run
             random.shuffle(self.crate_paths)
             count = 0
             for crate in self.crate_paths:
                 count += 1
                 print("\tBenchmarking {} ({}/{} crates)".format(crate, count, len(self.crate_paths)))
-                for DIR in EXP_DIRS:
+                for DIR in LOCAL_EXP_DIRS:
                     if DIR == UNSAFE_DIR:
-                        print("\t\tconverted")
-                    else: 
                         print("\t\toriginal")
+                    else: 
+                        print("\t\tconverted")
                     os.chdir(os.path.join(DIR, crate))
-                    run_log = os.path.join(RESULT_DIR, run, RUN_LOG)
-                    with open(run_log, "w") as fd: 
+                    run_out = os.path.join(RESULTS, str(run), RUN_OUT)
+                    run_err = os.path.join(RESULTS, str(run), RUN_ERR)
+                    with open(run_out, "w") as ro, open(run_err, "w") as re: 
                         try: 
                             subprocess.run(["cargo", "bench", "--verbose"], 
-                                timeout=1800, stdout=fd, stderr=fd)
+                                timeout=1800, stdout=ro, stderr=re)
                         except subprocess.TimeoutExpired as err:
                             print(err)
                             subprocess.run(["mkdir", "-p", "timeouts"])
-                            subprocess.run(["touch", "timeouts/run-{}-timedout".format(run)])
+                            subprocess.run(["touch", "timeouts/run-{}-timedout".format(str(run))])
         os.chdir(ROOT_PATH)
 
     def aggregate_results(self):
         print("Aggregating results")
 
         # Parse per-run data
-        subprocess.run(["mkdir", "-p", RESULT_DIR])
+        #subprocess.run(["mkdir", "-p", ALL_RESULTS_DIR])
+        #os.chdir(ALL_RESULTS_DIR)
         for crate_path in self.crate_paths: 
-            subprocess.run(["mkdir", "-p", crate_path])
+            #subprocess.run(["mkdir", "-p", crate_path])
             for run in range(self.num_runs):
-                unsafe_res = os.path.join(UNSAFE_DIR, crate_path, "results", str(run), RUN_LOG)
-                safe_res = os.path.join(SAFE_DIR, crate_path, "results", str(run), RUN_LOG)
-                outfile = os.path.join(RESULT_DIR, crate_PATH, "run-{}".format(str(run)))
-                dump_benchmark(outfile, unsafe_res, safe_res, 1)
-        os.chdir(RESULT_DIR)
+                unsafe_res = os.path.join(UNSAFE_DIR, crate_path, RESULTS, str(run), RUN_OUT)
+                safe_res = os.path.join(SAFE_DIR, crate_path, RESULTS, str(run), RUN_OUT)
+                parsed_file = os.path.join(ALL_RESULTS_DIR, crate_path, str(run), RUN_PARSED)
+                dump_benchmark(parsed_file, unsafe_res, safe_res, 1)
+        os.chdir(ALL_RESULTS_DIR)
 
         # Aggregate across runs
         for crate_path in self.crate_paths: 
-            crunchedfile = os.path.join(RESULT_DIR, crate_path, CRUNCHED)
+            crunchedfile = os.path.join(ALL_RESULTS_DIR, crate_path, CRUNCHED)
             path_wrangle(crunchedfile, HEADERS)
 
-            samplefile = os.path.join(RESULT_DIR, crate_path, "run-0")
-            with open(samplefile, "w") as fd: 
+            # Use one file to get the number of unique benchmarks
+            samplefile = os.path.join(ALL_RESULTS_DIR, crate_path, "0", RUN_PARSED)
+            with open(samplefile, "r") as fd: 
                 rows = len(fd.readlines()) - 1
             cols = 2
             matrix = numpy.zeros((rows, cols, self.num_runs))
 
+            # Populate matrix with per-run data for each benchmark
             bench_names = []
             for run in range(self.num_runs):
-                infile = os.path.join(RESULT_DIR, crate_path, "run-{}".format(str(run)))
+                infile = os.path.join(ALL_RESULTS_DIR, crate_path, str(run), RUN_PARSED)
                 with open(infile, "r") as infd: 
                     for row, line in enumerate(infd): 
                         # Skip header
@@ -233,9 +255,9 @@ class CIO:
                     cur.append(bench_name)
                     for col in range(cols):
                         med, stdev = stats2(matrix[row][col])
-                    cur.append(str(med))
-                    cur.append(str(stdev))
-                writerow(crunchfd, cur)
+                        cur.append(str(med))
+                        cur.append(str(stdev))
+                    writerow(crunchfd, cur)
 
 def arg_parse():
     parser = argparse.ArgumentParser()
@@ -272,8 +294,8 @@ if __name__ == "__main__":
     else: 
         cio.convert_to_safe()
 
-    start = datetime.datetime.now()
     # Compile benchmarks and log duration
+    start = datetime.datetime.now()
     cio.compile_benchmarks()
     end = datetime.datetime.now()
     duration = end - start
@@ -283,8 +305,8 @@ if __name__ == "__main__":
         fd.write("end:\t\t{}\n".format(end))
         fd.write("duration:\t{}\n".format(duration))
 
-    start = datetime.datetime.now()
     # Run benchmarks and log duration
+    start = datetime.datetime.now()
     cio.run_benchmarks()
     end = datetime.datetime.now()
     duration = end - start
