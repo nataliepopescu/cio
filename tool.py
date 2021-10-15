@@ -23,14 +23,13 @@ SAFE_DIR = os.path.join(ROOT_PATH, "safe-crates")
 EXP_DIRS = [UNSAFE_DIR, SAFE_DIR]
 RESULTS = "results"
 CRUNCHED = "crunched.data"
-
 HEADERS = ['#', 'bench-name', 'unmod-time', 'unmod-error', 'regex-time', 'regex-error']
 
 class CIO:
 
     def __init__(self, crates, rust_version, vendor, num_runs):
         self.rust_version = "mod" if rust_version == None else "nightly-{}".format(rust_version)
-        self.raw_results = "{}-{}".format(RESULTS, rust_version)
+        self.raw_results = "{}-{}".format(RESULTS, self.rust_version)
         self.agg_results = os.path.join(ROOT_PATH, self.raw_results)
         self.vendor = vendor
         self.num_runs = 10 if num_runs == None else num_runs
@@ -306,7 +305,7 @@ if __name__ == "__main__":
 
     # Run benchmarks and log duration
     start = datetime.datetime.now()
-    #cio.run_benchmarks()
+    cio.run_benchmarks()
     end = datetime.datetime.now()
     duration = end - start
     durfile = "duration-benchmark"
@@ -316,7 +315,7 @@ if __name__ == "__main__":
         fd.write("duration:\t{}\n".format(duration))
 
     # Aggregate results
-    #cio.aggregate_results()
+    cio.aggregate_results()
 
     # Generate plot
-    gen_figure1(self.agg_results)
+    #gen_figure1(self.agg_results)
