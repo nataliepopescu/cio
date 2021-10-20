@@ -95,9 +95,7 @@ class ResultProvider:
         self.worse_ = dict()
         global data
         for c in list(data.keys()):
-            # FIXME hardcoded
             filepath = os.path.join(self.root, c, self.datafile)
-            #filepath = os.path.join(self.root, c, "results_o3_dbg2_embed=yes", self.datafile)
             if not os.path.exists(filepath) or is_empty_datafile(filepath):
                 continue
             # open data file for reading
@@ -117,16 +115,16 @@ class ResultProvider:
 
                 unmod_time = cols[1]
                 unmod_error = cols[2]
-                bcrm_time = cols[3]
-                bcrm_error = cols[4]
+                regex_time = cols[3]
+                regex_error = cols[4]
 
                 # get speedup
-                if math.isclose(float(unmod_time), float(bcrm_time), rel_tol=1e-6): 
+                if math.isclose(float(unmod_time), float(regex_time), rel_tol=1e-6): 
                     speedup = 1
-                elif math.isclose(float(bcrm_time), float(0), rel_tol=1e-6):
+                elif math.isclose(float(regex_time), float(0), rel_tol=1e-6):
                     speedup = -1 # FIXME how does this show up?
                 else: 
-                    speedup = float(unmod_time) / float(bcrm_time)
+                    speedup = float(regex_time) / float(unmod_time)
 
                 bmarks[cols[0]] = speedup
 
