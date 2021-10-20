@@ -49,18 +49,27 @@ class CIO:
                 stdout=open(os.devnull, 'wb'), stderr=open(os.devnull, 'wb'))
             os.chdir(UNSAFE_DIR)
 
-    def vendor_deps(self):
-        os.chdir(UNSAFE_DIR)
-        for crate_path in self.crate_paths:
-            print("Vendoring {}".format(crate_path))
-            os.chdir(crate_path)
-            subprocess.run(["cargo", "vendor", "--versioned-dirs", VENDOR_DIR],
-                stdout=open(os.devnull, 'wb'), stderr=open(os.devnull, 'wb'))
-            subprocess.run(["mkdir", "-p", ".cargo"])
-            with open(".cargo/config.toml", 'a') as fd:
-                fd.write("[source.crates-io]\nreplace-with = \x22vendored-sources\x22\n\n[source.vendored-sources]\ndirectory = \x22{}\x22\n".format(VENDOR_DIR))
-            patchAll(".", VENDOR_DIR, VENDOR_DIR)
-            os.chdir(curdir)
+    def vendor_helper(self, crate_path):
+        print("Vendoring {}".format(crate_path))
+        subprocess.run(["cargo", "vendor", "--versioned-dirs", VENDOR_DIR],
+            stdout=open(os.devnull, 'wb'), stderr=open(os.devnull, 'wb'))
+        subprocess.run(["mkdir", "-p", ".cargo"])
+        with open(".cargo/config.toml", 'a') as fd:
+            fd.write("[source.crates-io]\nreplace-with = \x22vendored-sources\x22\n\n[source.vendored-sources]\ndirectory = \x22{}\x22\n".format(VENDOR_DIR))
+        patchAll(".", VENDOR_DIR, VENDOR_DIR)
+
+    def vendor_deps(self, crate=None):
+        if crate == None: 
+            for DIR in EXP_DIRS:
+                os.chdir(DIR)
+                for crate_path in self.crate_paths:
+                    os.chdir(crate_path)
+                    self.vendor_helper(crate_path)
+                os.chdir(DIR)
+        else: 
+            for DIR in EXP_DIRS: 
+                os.chdir(os.path.join(DIR, crate))
+                self.vendor_helper(crate)
 
     # Rustup directory override is not carried by copy, 
     # must be done for each directory individually
@@ -81,20 +90,24 @@ class CIO:
             subprocess.run(["tar", "-xf", "download"])
             subprocess.run(["rm", "download"])
 
-        # Set the correct criterion version and vendor
+        # Set the correct criterion version
         # in UNSAFE_DIR (will just be copied to SAFE_DIR)
         self.revert_criterion_version()
-        if self.vendor: 
-            self.vendor_deps()
 
         # If SAFE_DIR already exists, copy crates over
         # individually from UNSAFE_DIR
         if os.path.isdir(SAFE_DIR):
             for crate_path in self.crate_paths:
                 subprocess.run(["cp", "-r", crate_path, os.path.join(SAFE_DIR, crate_path)])
+                # Vendor dependencies
+                if self.vendor: 
+                    self.vendor_deps(crate_path)
         # Otherwise, copy the entire UNSAFE_DIR into (new) SAFE_DIR
         else: 
             subprocess.run(["cp", "-r", UNSAFE_DIR, SAFE_DIR])
+            # Vendor dependencies
+            if self.vendor:
+                self.vendor_deps()
 
     def convert_to_safe(self, mod=False):
         # If our modified rustc is used we can rely on the 
@@ -318,4 +331,4 @@ if __name__ == "__main__":
     cio.aggregate_results()
 
     # Generate plot
-    #gen_figure1(self.agg_results)
+    #gen_figure1(cio.agg_results)
